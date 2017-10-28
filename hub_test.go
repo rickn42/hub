@@ -117,23 +117,6 @@ func TestHub_TryAndPass(t *testing.T) {
 	}
 }
 
-func BenchmarkHub_2Connector(b *testing.B) {
-
-	c1 := hub.NewBufferedConnector(1)
-	c2 := hub.NewBufferedConnector(1)
-
-	h := hub.NewHub()
-	h.PlugIn(c1)
-	h.PlugIn(c2)
-
-	in := c1.InC()
-	out := c2.OutC()
-	for i := 0; i < b.N; i++ {
-		in <- i
-		<-out
-	}
-}
-
 func BenchmarkHub_10Connector(b *testing.B) {
 
 	const cnt = 10
@@ -154,5 +137,22 @@ func BenchmarkHub_10Connector(b *testing.B) {
 		for i := 1; i < cnt; i++ {
 			<-cs[i].OutC()
 		}
+	}
+}
+
+func TestHub_Destory(t *testing.T) {
+	startCnt := runtime.NumGoroutine()
+
+	h := hub.NewHub()
+	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
+	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
+	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
+
+	h.Destory()
+
+	time.Sleep(time.Millisecond)
+
+	if curCnt := runtime.NumGoroutine(); curCnt != startCnt {
+		t.Error("Destory error.", "startCnt=", startCnt, ", curCnt=", curCnt)
 	}
 }
