@@ -24,15 +24,21 @@ type Connector interface {
 h := hub.NewHub()
 h.PlugIn(someConnector)
 h.PlugIn(anotherConnector)
+h.PlugIn(andAnotherConnector)
 
+// Input value propagate all other connectors.
 someConnector.InC() <- 1
 someConnector.InC() <- 2
 someConnector.InC() <- 3
 
-// hub guarantees value order
+// Hub guarantees value order correct.
 <- anotherConnector.OutC() // 1
 <- anotherConnector.OutC() // 2
 <- anotherConnector.OutC() // 3
+
+<- andAnotherConnector.OutC() // 1
+<- andAnotherConnector.OutC() // 2
+<- andAnotherConnector.OutC() // 3
 ```
 
 
