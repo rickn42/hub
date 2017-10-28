@@ -12,7 +12,7 @@ func (c *connector) OutC() chan interface{} {
 	return c.out
 }
 
-func NewChannelWrapperConnector(in, out chan interface{}) *connector {
+func NewChannelWrapperConnector(in chan interface{}, out chan interface{}) *connector {
 	return &connector{in, out}
 }
 

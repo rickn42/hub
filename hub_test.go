@@ -49,14 +49,52 @@ func TestHub_ValueOrder(t *testing.T) {
 	}
 }
 
+func TestHub_Filter(t *testing.T) {
+	testIn := make(chan interface{}, 100)
+	testOut := make(chan interface{}, 100)
+	nothingOut := make(chan interface{}, 100)
+
+	c1 := hub.NewChannelWrapperConnector(testIn, nil)
+	c2 := hub.NewChannelWrapperConnector(nil, testOut)
+	c3 := hub.NewChannelWrapperConnector(nil, nothingOut)
+
+	evenFilter := func(old interface{}) (new interface{}, ok bool) {
+		if old.(int)%3 == 0 {
+			return old, true
+		}
+		return nil, false
+	}
+
+	h := hub.NewHub()
+	h.PlugIn(c1)
+	h.PlugIn(c2, evenFilter)
+	h.PlugIn(c3, hub.FilterNothing)
+
+	for i := 1; i < 10; i++ {
+		testIn <- i
+	}
+
+	expect := [3]interface{}{3, 6, 9}
+	got := [3]interface{}{<-testOut, <-testOut, <-testOut}
+	if got != expect {
+		t.Error("Filter not working! got=", got)
+	}
+
+	select {
+	case <-nothingOut:
+		t.Error("FilterNothing not working.")
+	default:
+	}
+}
+
 func BenchmarkHub_2Connector(b *testing.B) {
 
 	c1 := hub.NewBufferedConnector(1)
 	c2 := hub.NewBufferedConnector(1)
 
-	hub := hub.NewHub()
-	hub.PlugIn(c1)
-	hub.PlugIn(c2)
+	h := hub.NewHub()
+	h.PlugIn(c1)
+	h.PlugIn(c2)
 
 	in := c1.InC()
 	out := c2.OutC()
@@ -81,9 +119,9 @@ func BenchmarkHub_10Connector(b *testing.B) {
 		hub.NewBufferedConnector(1),
 	}
 
-	hub := hub.NewHub()
+	h := hub.NewHub()
 	for _, c := range cs {
-		hub.PlugIn(c)
+		h.PlugIn(c)
 	}
 
 	in := cs[0].InC()

@@ -7,6 +7,7 @@ import (
 type Port struct {
 	Connector
 	SignalChan chan Signal
+	Filters    []Filter
 }
 
 type Signal struct {
@@ -16,17 +17,19 @@ type Signal struct {
 }
 
 type hub struct {
-	sig   chan Signal
-	mu    sync.RWMutex
-	ports map[Connector]Port
+	sig       chan Signal
+	destoryed chan struct{}
+	mu        sync.RWMutex
+	ports     map[Connector]Port
 }
 
-func (h *hub) PlugIn(c Connector) {
+func (h *hub) PlugIn(c Connector, filters ...Filter) {
 	h.mu.Lock()
 
 	port := Port{
 		Connector:  c,
 		SignalChan: make(chan Signal),
+		Filters:    filters,
 	}
 
 	h.ports[c] = port
@@ -35,14 +38,19 @@ func (h *hub) PlugIn(c Connector) {
 
 	go func() {
 		in := c.InC()
-		for value := range in {
-			done := make(chan struct{})
-			h.sig <- Signal{
-				From:  c,
-				Value: value,
-				Done:  done,
+		for {
+			select {
+			case value := <-in:
+				done := make(chan struct{})
+				h.sig <- Signal{
+					From:  c,
+					Value: value,
+					Done:  done,
+				}
+				<-done
+			case <-h.destoryed:
+				return
 			}
-			<-done
 		}
 	}()
 }
@@ -63,8 +71,9 @@ func (h *hub) PlugOut(c Connector) {
 
 func NewHub() Hub {
 	h := &hub{
-		sig:   make(chan Signal),
-		ports: make(map[Connector]Port),
+		sig:       make(chan Signal),
+		destoryed: make(chan struct{}),
+		ports:     make(map[Connector]Port),
 	}
 
 	go func() {
@@ -78,6 +87,7 @@ func NewHub() Hub {
 
 func (h *hub) Destory() {
 	close(h.sig)
+	close(h.destoryed)
 }
 
 func (h *hub) propagate(sig Signal) {
@@ -88,7 +98,20 @@ func (h *hub) propagate(sig Signal) {
 			continue
 		}
 
-		port.OutC() <- sig.Value
+		value := sig.Value
+		ok := true
+		for _, filter := range port.Filters {
+			value, ok = filter(value)
+			if !ok {
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+
+		// TODO ensure || try
+		port.OutC() <- value
 	}
 
 	close(sig.Done)
