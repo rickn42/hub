@@ -4,32 +4,54 @@ import (
 	"sync"
 )
 
-type Port struct {
+type port struct {
 	Connector
-	SignalChan chan Signal
-	Filters    []Filter
+	signalChan chan signal
+	filters    []Filter
 }
 
-type Signal struct {
-	Done  chan struct{}
-	From  Connector
-	Value interface{}
+type signal struct {
+	done  chan struct{}
+	from  Connector
+	value interface{}
 }
 
 type hub struct {
-	sig       chan Signal
-	destoryed chan struct{}
-	mu        sync.RWMutex
-	ports     map[Connector]Port
+	sig     chan signal
+	destroy chan struct{}
+	mu      sync.RWMutex
+	ports   map[Connector]port
+}
+
+func NewHub() Hub {
+	h := &hub{
+		sig:     make(chan signal),
+		destroy: make(chan struct{}),
+		ports:   make(map[Connector]port),
+	}
+
+	go func() {
+		for signal := range h.sig {
+			select {
+			case <-h.destroy:
+				continue
+			default:
+			}
+
+			h.propagate(signal)
+		}
+	}()
+
+	return h
 }
 
 func (h *hub) PlugIn(c Connector, filters ...Filter) {
 	h.mu.Lock()
 
-	port := Port{
+	port := port{
 		Connector:  c,
-		SignalChan: make(chan Signal),
-		Filters:    filters,
+		signalChan: make(chan signal),
+		filters:    filters,
 	}
 
 	h.ports[c] = port
@@ -40,17 +62,20 @@ func (h *hub) PlugIn(c Connector, filters ...Filter) {
 		in := c.InC()
 		for {
 			select {
-			case value := <-in:
-				done := make(chan struct{})
-				h.sig <- Signal{
-					From:  c,
-					Value: value,
-					Done:  done,
-				}
-				<-done
-			case <-h.destoryed:
+			case <-h.destroy:
+				h.PlugOut(c)
 				return
+			default:
 			}
+
+			value := <-in
+			done := make(chan struct{})
+			h.sig <- signal{
+				from:  c,
+				value: value,
+				done:  done,
+			}
+			<-done
 		}
 	}()
 }
@@ -65,42 +90,28 @@ func (h *hub) PlugOut(c Connector) {
 	}
 
 	delete(h.ports, c)
+	close(port.signalChan)
 
-	close(port.SignalChan)
-}
-
-func NewHub() Hub {
-	h := &hub{
-		sig:       make(chan Signal),
-		destoryed: make(chan struct{}),
-		ports:     make(map[Connector]Port),
-	}
-
-	go func() {
-		for signal := range h.sig {
-			h.propagate(signal)
+	if len(h.ports) == 0 {
+		select {
+		case <-h.destroy:
+			close(h.sig)
+		default:
 		}
-	}()
-
-	return h
+	}
 }
 
-func (h *hub) Destory() {
-	close(h.sig)
-	close(h.destoryed)
-}
-
-func (h *hub) propagate(sig Signal) {
+func (h *hub) propagate(sig signal) {
 	h.mu.RLock()
 
 	for c, port := range h.ports {
-		if c == sig.From {
+		if c == sig.from {
 			continue
 		}
 
-		value := sig.Value
+		value := sig.value
 		ok := true
-		for _, filter := range port.Filters {
+		for _, filter := range port.filters {
 			value, ok = filter(value)
 			if !ok {
 				break
@@ -120,7 +131,17 @@ func (h *hub) propagate(sig Signal) {
 		}
 	}
 
-	close(sig.Done)
+	close(sig.done)
 
 	h.mu.RUnlock()
+}
+
+func (h *hub) Destory() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	close(h.destroy)
+	if len(h.ports) == 0 {
+		close(h.sig)
+	}
 }
