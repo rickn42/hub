@@ -12,16 +12,34 @@ func (c *connector) OutC() chan interface{} {
 	return c.out
 }
 
-func NewChannelWrapperConnector(in chan interface{}, out chan interface{}) *connector {
-	return &connector{in, out}
+func (c *connector) TryAndPass() (ok bool) {
+	return false
+}
+
+func NewConnectorWithChannels(in chan interface{}, out chan interface{}) *connector {
+	return &connector{in: in, out: out}
 }
 
 func NewBufferedConnector(bufSize int) *connector {
-	if bufSize < 1 {
-		bufSize = 1
-	}
 	return &connector{
-		make(chan interface{}, bufSize),
-		make(chan interface{}, bufSize),
+		in:  make(chan interface{}, bufSize),
+		out: make(chan interface{}, bufSize),
+	}
+}
+
+type tryAndPassWrapper struct {
+	Connector
+	tryAndPass bool
+}
+
+func (c *tryAndPassWrapper) TryAndPass() bool {
+	return true
+
+}
+
+func WrapConnectorWithTryAndPass(c Connector) Connector {
+	return &tryAndPassWrapper{
+		Connector:  c,
+		tryAndPass: true,
 	}
 }

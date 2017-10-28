@@ -13,8 +13,12 @@ Hub get channel connectors. And connectors got signal each other.
 
 ```go
 type Connector interface {
-	InC() chan interface{}
-	OutC() chan interface{}
+	// InC returns an input channel which data get into the hub.
+    InC() chan interface{}
+    // OutC returns an output channel which data get out from the hub.
+    OutC() chan interface{}
+    // TryAndPass is signed if pass or not when output channel not ready.
+    TryAndPass() bool
 }
 ```
 
@@ -60,5 +64,49 @@ someConnector.InC() <- 4
 
 // only got 3 
 <-anotherCennector.OutC()
+```
+
+### try and pass 
+
+The value passing in hub is working synchronizely.
+
+So if other connector did not use `OutC()` channel, the whole hub is blocked until ready.
+
+Use `TryAndPass() = true`.
+
+```go
+// channel buffer size is 0
+someConnector := hub.NewBufferedConnector(0))
+zeroBufferConnector := hub.NewBufferedConnector(0)
+
+h := hub.NewHub()
+h.PlugIn(someConnector)
+h.PlugIn(zeroBufferConnector)
+
+// It is blocked! anotherConnector's output channel is not ready!
+someConnector.InC() <- 1
+```
+
+```go
+h := hub.NewHub()
+h.PlugIn(someConnector)
+// This wrapper just has TryAndPass()=true method.  
+h.PlugIn(hub.WrapConnectorWithTryAndPass(zeroBufferConnector))
+
+// Input channel is working. The zeroBufferConnector is just passed.
+someConnector.InC() <- 1
+someConnector.InC() <- 2
+someConnector.InC() <- 3
+
+// waiting a moment for all value passing.
+time.Sleep(time.Millisecond)
+
+// Now get zeroBufferConnector output channel ready.
+go func() {
+	<-zeroBufferConnector.OutC() // It will returns 100
+}()
+runtime.Gosched()
+
+someConnector.InC() <- 100
 ```
 

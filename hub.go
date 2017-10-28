@@ -110,8 +110,14 @@ func (h *hub) propagate(sig Signal) {
 			continue
 		}
 
-		// TODO ensure || try
-		port.OutC() <- value
+		if port.TryAndPass() {
+			select {
+			case port.OutC() <- value:
+			default:
+			}
+		} else {
+			port.OutC() <- value
+		}
 	}
 
 	close(sig.Done)
