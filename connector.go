@@ -12,6 +12,7 @@ func (c *connector) OutC() chan interface{} {
 	return c.out
 }
 
+// TryAndPass default is false. So default message passing type is sync.
 func (c *connector) TryAndPass() (ok bool) {
 	return false
 }
@@ -27,19 +28,17 @@ func NewBufferedConnector(bufSize int) *connector {
 	}
 }
 
+// tryAndPassWrapper wrap Connector with TryAndPass() always true method.
 type tryAndPassWrapper struct {
 	Connector
-	tryAndPass bool
 }
 
-func (c *tryAndPassWrapper) TryAndPass() bool {
+func (c *tryAndPassWrapper) TryAndPass() (ok bool) {
 	return true
-
 }
 
 func WrapConnectorWithTryAndPass(c Connector) Connector {
 	return &tryAndPassWrapper{
-		Connector:  c,
-		tryAndPass: true,
+		Connector: c,
 	}
 }
