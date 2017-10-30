@@ -148,6 +148,8 @@ func TestHub_Destory(t *testing.T) {
 	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
 	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
 
+	time.Sleep(time.Millisecond)
+
 	h.Destory()
 
 	time.Sleep(time.Millisecond)

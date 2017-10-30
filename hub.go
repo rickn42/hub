@@ -48,18 +48,24 @@ func NewHub() Hub {
 func (h *hub) PlugIn(c Connector, filters ...Filter) {
 	h.mu.Lock()
 
-	port := port{
-		Connector:  c,
-		signalChan: make(chan signal),
-		filters:    filters,
-	}
+	if c.OutC() != nil {
+		port := port{
+			Connector:  c,
+			signalChan: make(chan signal),
+			filters:    filters,
+		}
 
-	h.ports[c] = port
+		h.ports[c] = port
+	}
 
 	h.mu.Unlock()
 
 	go func() {
 		in := c.InC()
+		if in == nil {
+			return
+		}
+
 		for {
 			select {
 			case <-h.destroy:
