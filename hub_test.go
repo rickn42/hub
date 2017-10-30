@@ -83,8 +83,8 @@ func TestHub_Filter(t *testing.T) {
 	}
 
 	select {
-	case <-nothingOut:
-		t.Error("FilterNothing not working.")
+	case v := <-nothingOut:
+		t.Error("FilterNothing not working.", v)
 	default:
 	}
 }
@@ -140,18 +140,137 @@ func BenchmarkHub_10Connector(b *testing.B) {
 	}
 }
 
-func TestHub_Destory(t *testing.T) {
+func TestHub_PlugOut_Connector(t *testing.T) {
+	h := hub.NewHub()
+
+	startCnt := runtime.NumGoroutine()
+	connector := hub.NewConnectorWithChannels(nil, nil)
+	h.PlugIn(connector)
+	h.PlugOut(connector)
+
+	time.Sleep(time.Millisecond)
+	if curCnt := runtime.NumGoroutine(); curCnt != startCnt {
+		t.Error("PlugOut error.", "startCnt=", startCnt, ", curCnt=", curCnt)
+	}
+
+	startCnt = runtime.NumGoroutine()
+	in := make(chan interface{})
+	connector = hub.NewConnectorWithChannels(in, nil)
+	h.PlugIn(connector)
+	h.PlugOut(connector)
+	close(in)
+
+	time.Sleep(time.Millisecond)
+	if curCnt := runtime.NumGoroutine(); curCnt != startCnt {
+		t.Error("PlugOut error.", "startCnt=", startCnt, ", curCnt=", curCnt)
+	}
+
+	startCnt = runtime.NumGoroutine()
+	out := make(chan interface{})
+	connector = hub.NewConnectorWithChannels(nil, out)
+	h.PlugIn(connector)
+	h.PlugOut(connector)
+	close(out)
+
+	time.Sleep(time.Millisecond)
+	if curCnt := runtime.NumGoroutine(); curCnt != startCnt {
+		t.Error("PlugOut error.", "startCnt=", startCnt, ", curCnt=", curCnt)
+	}
+
+	startCnt = runtime.NumGoroutine()
+	in = make(chan interface{})
+	out = make(chan interface{})
+	connector = hub.NewConnectorWithChannels(in, out)
+	h.PlugIn(connector)
+	h.PlugOut(connector)
+	close(in)
+	close(out)
+
+	time.Sleep(time.Millisecond)
+	if curCnt := runtime.NumGoroutine(); curCnt != startCnt {
+		t.Error("PlugOut error.", "startCnt=", startCnt, ", curCnt=", curCnt)
+	}
+}
+
+func TestHub_PlugOut_Re_PlugIn(t *testing.T) {
+
+	h := hub.NewHub()
+	c := hub.NewBufferedConnector(10)
+	c2 := hub.NewBufferedConnector(10)
+
+	h.PlugIn(c)
+	h.PlugIn(c2)
+
+	h.PlugOut(c)
+	h.PlugIn(c)
+
+	n := 100
+	in := c.InC()
+	out := c2.OutC()
+
+	in <- n
+	select {
+	case v := <-out:
+		if v != n {
+			t.Error("Re PlugIn failed.", v)
+		}
+	case <-time.NewTimer(time.Millisecond).C:
+		t.Error("Re PlugIn not working.")
+	}
+}
+
+func TestHub_Destory_EmptyHub(t *testing.T) {
 	startCnt := runtime.NumGoroutine()
 
 	h := hub.NewHub()
-	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
-	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
-	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
-
+	time.Sleep(time.Millisecond)
+	h.Destory()
 	time.Sleep(time.Millisecond)
 
-	h.Destory()
+	if curCnt := runtime.NumGoroutine(); curCnt != startCnt {
+		t.Error("Destory error.", "startCnt=", startCnt, ", curCnt=", curCnt)
+	}
+}
 
+func TestHub_Destroy(t *testing.T) {
+	startCnt := runtime.NumGoroutine()
+
+	c1 := make(chan interface{})
+	c2 := make(chan interface{})
+	c3 := make(chan interface{})
+	c4 := make(chan interface{})
+	c5 := make(chan interface{})
+	c6 := make(chan interface{})
+
+	closed := make(chan interface{})
+	close(closed)
+
+	h := hub.NewHub()
+
+	// nil channel
+	h.PlugIn(hub.NewConnectorWithChannels(nil, nil))
+	h.PlugIn(hub.NewConnectorWithChannels(c1, nil))
+	h.PlugIn(hub.NewConnectorWithChannels(nil, c2))
+	h.PlugIn(hub.NewConnectorWithChannels(c3, c4))
+
+	// closed channel
+	h.PlugIn(hub.NewConnectorWithChannels(closed, nil))
+	h.PlugIn(hub.NewConnectorWithChannels(nil, closed))
+	h.PlugIn(hub.NewConnectorWithChannels(closed, closed))
+
+	// mix channel
+	h.PlugIn(hub.NewConnectorWithChannels(c5, closed))
+	h.PlugIn(hub.NewConnectorWithChannels(closed, c6))
+
+	h.Destory()
+	close(c1)
+	close(c2)
+	close(c3)
+	close(c4)
+	close(c5)
+	close(c6)
+
+	// for some goroutine termination delayed.
 	time.Sleep(time.Millisecond)
 
 	if curCnt := runtime.NumGoroutine(); curCnt != startCnt {

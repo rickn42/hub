@@ -4,36 +4,44 @@ import (
 	"sync"
 )
 
-type port struct {
-	Connector
-	signalChan chan signal
-	filters    []Filter
-}
-
 type signal struct {
-	done  chan struct{}
-	from  Connector
-	value interface{}
+	from Connector
+	// message passing done
+	done    chan struct{}
+	message interface{}
 }
 
 type hub struct {
-	sig     chan signal
+	// notify hub destroy signal
+	once    sync.Once
 	destroy chan struct{}
-	mu      sync.RWMutex
-	ports   map[Connector]port
+
+	// destroy hub
+	onceD sync.Once
+	sig   chan signal
+
+	mu    sync.RWMutex
+	ports map[Connector]*port
 }
 
 func NewHub() Hub {
 	h := &hub{
 		sig:     make(chan signal),
 		destroy: make(chan struct{}),
-		ports:   make(map[Connector]port),
+		ports:   make(map[Connector]*port),
 	}
 
 	go func() {
+		defer func() {
+			logln("Hub signal-loop destoryed.")
+		}()
+
+		logln("Hub signal-loop start.")
+
 		for signal := range h.sig {
 			select {
 			case <-h.destroy:
+				// Continue loop and suck all messages.
 				continue
 			default:
 			}
@@ -46,79 +54,102 @@ func NewHub() Hub {
 }
 
 func (h *hub) PlugIn(c Connector, filters ...Filter) {
-	h.mu.Lock()
-
-	if c.OutC() != nil {
-		port := port{
-			Connector:  c,
-			signalChan: make(chan signal),
-			filters:    filters,
-		}
-
-		h.ports[c] = port
+	select {
+	case <-h.destroy:
+		panic("The hub was destoryed")
+	default:
 	}
 
+	logln("Connector plug in", c)
+
+	p := newPort(c, filters...)
+
+	h.mu.Lock()
+	h.ports[c] = p
 	h.mu.Unlock()
 
-	go func() {
+	go func(h *hub, p *port) {
+		defer func() {
+			logln("Port listen-loop stop. (plugged out!)")
+			close(p.pluggedOut)
+		}()
+
+		c := p.Connector
+
+		logln("Port listen-loop start.")
+
 		in := c.InC()
 		if in == nil {
+			<-p.plugOut
 			return
 		}
 
 		for {
 			select {
-			case <-h.destroy:
-				h.PlugOut(c)
+			case <-p.plugOut: // Check if the connector plugged out.
 				return
-			default:
-			}
 
-			value := <-in
-			done := make(chan struct{})
-			h.sig <- signal{
-				from:  c,
-				value: value,
-				done:  done,
+			case msg := <-in:
+				if msg == nil {
+					// If nil msg received, consider as input channel closed.
+					<-p.plugOut
+					return
+				}
+
+				done := make(chan struct{})
+				h.sig <- signal{
+					from:    c,
+					message: msg,
+					done:    done,
+				}
+				<-done
 			}
-			<-done
 		}
-	}()
+	}(h, p)
 }
-
 func (h *hub) PlugOut(c Connector) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	done := h.plugOut(c)
+	h.mu.Unlock()
 
-	port, ok := h.ports[c]
+	<-done
+}
+
+func (h *hub) plugOut(c Connector) (done chan struct{}) {
+
+	logln("Connector plug out", c)
+
+	p, ok := h.ports[c]
 	if !ok {
+		h.mu.Unlock()
 		return
 	}
-
 	delete(h.ports, c)
-	close(port.signalChan)
 
-	if len(h.ports) == 0 {
-		select {
-		case <-h.destroy:
-			close(h.sig)
-		default:
-		}
-	}
+	p.donePlugOut()
+
+	return p.pluggedOut
 }
 
 func (h *hub) propagate(sig signal) {
 	h.mu.RLock()
 
+	from := sig.from
+
 	for c, port := range h.ports {
-		if c == sig.from {
+		if c == from {
 			continue
 		}
 
-		value := sig.value
+		if port.OutC() == nil {
+			continue
+		}
+
+		msg := sig.message
 		ok := true
+
 		for _, filter := range port.filters {
-			value, ok = filter(value)
+			msg, ok = filter(msg)
 			if !ok {
 				break
 			}
@@ -129,11 +160,11 @@ func (h *hub) propagate(sig signal) {
 
 		if port.TryAndPass() {
 			select {
-			case port.OutC() <- value:
+			case port.OutC() <- msg:
 			default:
 			}
 		} else {
-			port.OutC() <- value
+			port.OutC() <- msg
 		}
 	}
 
@@ -144,10 +175,33 @@ func (h *hub) propagate(sig signal) {
 
 func (h *hub) Destory() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
-	close(h.destroy)
-	if len(h.ports) == 0 {
-		close(h.sig)
+	h.notiDestory()
+
+	var ds []chan struct{}
+	for c := range h.ports {
+		ds = append(ds, h.plugOut(c))
 	}
+
+	h.mu.Unlock()
+
+	for _, done := range ds {
+		<-done
+	}
+
+	h.doDestory()
+}
+
+func (h *hub) notiDestory() {
+	c := h.destroy
+	h.once.Do(func() {
+		close(c)
+	})
+}
+
+func (h *hub) doDestory() {
+	c := h.sig
+	h.onceD.Do(func() {
+		close(c)
+	})
 }
