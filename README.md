@@ -4,25 +4,23 @@ Hub get channel connectors. And connectors got signal each other.
 
 ### Basic
 
-`Connector` has 2 channel. 
+`Connector` is interface which has 2 channel.
 
-`InC()` return input channel which data get into it.
+`InC` returns an input channel which data get into the hub.
 
-`OutC()` return output which data get out. 
+`OutC` returns an output channel which data get out from the hub.
 
+`TryAndPass` is signed if pass or not when output channel not ready.
 
 ```go
 type Connector interface {
-	// InC returns an input channel which data get into the hub.
     InC() chan interface{}
-    // OutC returns an output channel which data get out from the hub.
     OutC() chan interface{}
-    // TryAndPass is signed if pass or not when output channel not ready.
     TryAndPass() bool
 }
 ```
 
-### How to use 
+### Plug-in
 
 ```go
 h := hub.NewHub()
@@ -45,37 +43,53 @@ someConnector.InC() <- 3
 <- andAnotherConnector.OutC() // 3
 ```
 
-
-### Filter 
+### Plug-out 
 
 ```go
 h := hub.NewHub()
 h.PlugIn(someConnector)
-h.PlugIn(anotherConnector, func(o interface{}) (n interface{}, ok bool) {
-	if o.(int) % 3 == 0 {
-		return o, true
-	} 
-	return nil, false 
-})
+h.PlugOut(someConnector)
 
+// Re-plugin is still working.
+h.PlugIn(someConnector)
+```
+
+### Filter 
+
+```go
+type Filter = func(old interface{}) (new interface{}, ok bool)
+```
+
+```go
+evenFilter = func(v interface{}) (interface{}, bool) {
+    if v.(int) % 2 == 0 {
+        return v, true
+    } 
+    return nil, false 
+}
+
+h := hub.NewHub()
+h.PlugIn(someConnector)
+h.PlugIn(anotherConnector, evenFilter) 
+
+someConnector.InC() <- 1
 someConnector.InC() <- 2
 someConnector.InC() <- 3
-someConnector.InC() <- 4
 
-// only got 3 
+// only got 2
 <-anotherCennector.OutC()
 ```
 
-### try and pass 
+### Try and Pass 
 
 The value passing in hub is working synchronizely.
 
-So if other connector did not use `OutC()` channel, the whole hub is blocked until ready.
+So if other connector's 'OutC()` channel not in use and no more buffer, 
 
-Use `TryAndPass() = true`.
+then value passing is blocked.
 
 ```go
-// channel buffer size is 0
+// Channel buffer size is 0
 someConnector := hub.NewBufferedConnector(0))
 zeroBufferConnector := hub.NewBufferedConnector(0)
 
@@ -87,26 +101,43 @@ h.PlugIn(zeroBufferConnector)
 someConnector.InC() <- 1
 ```
 
+Use `TryAndPass()` set true.
+
+It will just pass channel when channel is not in use.
+
 ```go
+// This wrapper just has TryAndPass() always true method.
+anotherConnector := hub.WrapConnectorWithTryAndPass(zeroBufferConnector)
+
 h := hub.NewHub()
 h.PlugIn(someConnector)
-// This wrapper just has TryAndPass()=true method.  
-h.PlugIn(hub.WrapConnectorWithTryAndPass(zeroBufferConnector))
+h.PlugIn(anotherConnector)
 
-// Input channel is working. The zeroBufferConnector is just passed.
+// Channel is not blocked. 
 someConnector.InC() <- 1
 someConnector.InC() <- 2
 someConnector.InC() <- 3
 
-// waiting a moment for all value passing.
+// Waiting a moment for all value passing.
 time.Sleep(time.Millisecond)
 
-// Now get zeroBufferConnector output channel ready.
+// Now set zeroBufferConnector output channel ready.
 go func() {
-	<-zeroBufferConnector.OutC() // It will returns 100
+	// It will returns 100
+	<-zeroBufferConnector.OutC() 
 }()
 runtime.Gosched()
 
+// It will not be blocked.
 someConnector.InC() <- 100
 ```
 
+### Caveat
+
+#### `interface{}` value of `InC()` is must not be `nil`.
+
+if `nil` is put into input channel,
+
+that input channel <u>**regard as closed channel.**</u>
+
+So no more listen that input channel.  
