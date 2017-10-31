@@ -1,9 +1,11 @@
 package hub
 
 import (
+	"errors"
 	"sync"
 )
 
+// signal is a inner message structure in hub.
 type signal struct {
 	from Connector
 	// message passing done
@@ -11,6 +13,7 @@ type signal struct {
 	message interface{}
 }
 
+// hub is implementation of Hub interface.
 type hub struct {
 	// notify hub destroy signal
 	once    sync.Once
@@ -31,56 +34,66 @@ func NewHub() Hub {
 		ports:   make(map[Connector]*port),
 	}
 
-	go func() {
-		for signal := range h.sig {
-			select {
-			case <-h.destroy:
-				// Continue loop and suck all messages.
-				continue
-			default:
-			}
-
-			h.propagate(signal)
-		}
-	}()
+	startHubGoroutine(h)
 
 	return h
 }
 
-func (h *hub) PlugIn(c Connector, filters ...Filter) {
+func startHubGoroutine(h *hub) {
+	// It will return when sig-channel closed.
+	go func() {
+		for signal := range h.sig {
+			select {
+			case <-h.destroy:
+				// Suck all signal out until sig channel is closed.
+				continue
+			default:
+			}
+
+			h.broadcast(signal)
+		}
+	}()
+}
+
+func (h *hub) PlugIn(c Connector, filters ...Filter) error {
 	select {
 	case <-h.destroy:
-		panic("The hub was destoryed")
+		return errors.New("the hub was destroyed")
 	default:
 	}
 
-	p := newPort(c, filters...)
-
+	p := newPort(c, filters)
 	h.mu.Lock()
 	h.ports[c] = p
 	h.mu.Unlock()
 
-	go func(h *hub, p *port) {
+	startConnectorGoroutine(h, p)
+	return nil
+}
+
+func startConnectorGoroutine(h *hub, p *port) {
+	// It will return when plugging out.
+	go func() {
 		defer func() {
 			close(p.pluggedOut)
 		}()
 
 		c := p.Connector
-
 		in := c.InC()
+
 		if in == nil {
-			<-p.plugOut
+			<-p.plugOut // nil channel. Just wait for plugging out.
 			return
 		}
 
 		for {
 			select {
-			case <-p.plugOut: // Check if the connector plugged out.
+			case <-p.plugOut: // Just wait for plugging out.
 				return
 
 			case msg, ok := <-in:
 				if !ok {
-					// Closed channel. Just wait plugged out.
+					// closed channel. Just wait plugging out.
 					<-p.plugOut
 					return
 				}
@@ -94,8 +107,9 @@ func (h *hub) PlugIn(c Connector, filters ...Filter) {
 				<-done
 			}
 		}
-	}(h, p)
+	}()
 }
+
 func (h *hub) PlugOut(c Connector) {
 	h.mu.Lock()
 	done := h.plugOut(c)
@@ -105,20 +119,18 @@ func (h *hub) PlugOut(c Connector) {
 }
 
 func (h *hub) plugOut(c Connector) (done chan struct{}) {
-
 	p, ok := h.ports[c]
 	if !ok {
-		h.mu.Unlock()
 		return
 	}
 	delete(h.ports, c)
 
-	p.donePlugOut()
-
+	p.notifyPlugOut()
 	return p.pluggedOut
 }
 
-func (h *hub) propagate(sig signal) {
+// broadcast send signal to all connector.
+func (h *hub) broadcast(sig signal) {
 	h.mu.RLock()
 
 	from := sig.from
@@ -162,31 +174,30 @@ func (h *hub) propagate(sig signal) {
 
 func (h *hub) Destory() {
 	h.mu.Lock()
-
-	h.notiDestory()
-
+	h.notifyDestroy()
 	var ds []chan struct{}
 	for c := range h.ports {
 		ds = append(ds, h.plugOut(c))
 	}
-
 	h.mu.Unlock()
 
 	for _, done := range ds {
 		<-done
 	}
 
-	h.doDestory()
+	h.doDestroy()
 }
 
-func (h *hub) notiDestory() {
+// notifyDestroy close destroy-channel for notifying hub goroutine to vanish all signals.
+func (h *hub) notifyDestroy() {
 	c := h.destroy
 	h.once.Do(func() {
 		close(c)
 	})
 }
 
-func (h *hub) doDestory() {
+// doDestroy close sig-channel so terminate hub goroutine.
+func (h *hub) doDestroy() {
 	c := h.sig
 	h.onceD.Do(func() {
 		close(c)

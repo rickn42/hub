@@ -20,6 +20,16 @@ type Connector interface {
 }
 ```
 
+`Hub` is collection of Connectors and mediate messages to Connector to Connector.
+
+```go
+type Hub interface {
+	PlugIn(c Connector, filters ...Filter) error
+	PlugOut(c Connector)
+	Destory()
+}
+```
+
 ### Plug-in
 
 ```go

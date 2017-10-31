@@ -2,7 +2,7 @@ package hub
 
 // Hub is collection of Connectors. It mediates channel values.
 type Hub interface {
-	PlugIn(c Connector, filters ...Filter)
+	PlugIn(c Connector, filters ...Filter) error
 	PlugOut(c Connector)
 	Destory()
 }
@@ -17,6 +17,8 @@ type Connector interface {
 	TryAndPass() bool
 }
 
+// Filter is a alias function that change value or vanish value
+// If ok is false, that value is vanished.
 type Filter = func(old interface{}) (new interface{}, ok bool)
 
 var FilterNothing = func(interface{}) (_ interface{}, ok bool) {

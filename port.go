@@ -4,6 +4,7 @@ import (
 	"sync"
 )
 
+// port is a wrapper of Connector with stuff for hub using.
 type port struct {
 	Connector
 	filters    []Filter
@@ -12,7 +13,7 @@ type port struct {
 	pluggedOut chan struct{}
 }
 
-func newPort(c Connector, filters ...Filter) *port {
+func newPort(c Connector, filters []Filter) *port {
 	return &port{
 		Connector:  c,
 		filters:    filters,
@@ -21,10 +22,11 @@ func newPort(c Connector, filters ...Filter) *port {
 	}
 }
 
-func (p *port) donePlugOut() {
+// notifyPlugOut close plugOut channel.
+// So notify to Connector goroutine.
+func (p *port) notifyPlugOut() {
 	c := p.plugOut
 	p.once.Do(func() {
 		close(c)
-		return
 	})
 }

@@ -1,5 +1,6 @@
 package hub
 
+// connector is implementation of Connector interface
 type connector struct {
 	in, out chan interface{}
 }
