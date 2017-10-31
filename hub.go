@@ -32,12 +32,6 @@ func NewHub() Hub {
 	}
 
 	go func() {
-		defer func() {
-			logln("Hub signal-loop destoryed.")
-		}()
-
-		logln("Hub signal-loop start.")
-
 		for signal := range h.sig {
 			select {
 			case <-h.destroy:
@@ -60,8 +54,6 @@ func (h *hub) PlugIn(c Connector, filters ...Filter) {
 	default:
 	}
 
-	logln("Connector plug in", c)
-
 	p := newPort(c, filters...)
 
 	h.mu.Lock()
@@ -70,13 +62,10 @@ func (h *hub) PlugIn(c Connector, filters ...Filter) {
 
 	go func(h *hub, p *port) {
 		defer func() {
-			logln("Port listen-loop stop. (plugged out!)")
 			close(p.pluggedOut)
 		}()
 
 		c := p.Connector
-
-		logln("Port listen-loop start.")
 
 		in := c.InC()
 		if in == nil {
@@ -116,8 +105,6 @@ func (h *hub) PlugOut(c Connector) {
 }
 
 func (h *hub) plugOut(c Connector) (done chan struct{}) {
-
-	logln("Connector plug out", c)
 
 	p, ok := h.ports[c]
 	if !ok {
