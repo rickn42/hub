@@ -132,12 +132,3 @@ runtime.Gosched()
 someConnector.InC() <- 100
 ```
 
-### Caveat
-
-#### `interface{}` value of `InC()` is must not be `nil`.
-
-if `nil` is put into input channel,
-
-that input channel <u>**regard as closed channel.**</u>
-
-So no more listen that input channel.  

@@ -78,9 +78,9 @@ func (h *hub) PlugIn(c Connector, filters ...Filter) {
 			case <-p.plugOut: // Check if the connector plugged out.
 				return
 
-			case msg := <-in:
-				if msg == nil {
-					// If nil msg received, consider as input channel closed.
+			case msg, ok := <-in:
+				if !ok {
+					// Closed channel. Just wait plugged out.
 					<-p.plugOut
 					return
 				}
